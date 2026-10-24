@@ -1,0 +1,101 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<style>
+html,body{margin:0;height:100%;background:#0b1f1d;color:#fff;font-family:sans-serif;overflow:hidden}
+#remote{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#0b1f1d}
+#local{position:absolute;right:12px;top:64px;width:96px;height:128px;object-fit:cover;border-radius:12px;background:#222;border:2px solid #ffffff44;transform:scaleX(-1)}
+#info{position:absolute;top:0;left:0;right:0;text-align:center;padding:14px 12px;text-shadow:0 1px 4px #000}
+#name{font-size:20px;font-weight:600}
+#timer{font-size:14px;opacity:.9;margin-top:2px}
+#bar{position:absolute;bottom:32px;left:0;right:0;display:flex;justify-content:center;gap:16px}
+button{width:56px;height:56px;border-radius:50%;border:0;background:#ffffff33;color:#fff;font-size:24px;padding:0}
+button.off{background:#fff;color:#000}
+button.end{background:#e53935}
+</style></head>
+<body>
+<video id="remote" autoplay playsinline></video>
+<video id="local" autoplay playsinline muted></video>
+<div id="info"><div id="name"></div><div id="timer">Connecting…</div></div>
+<div id="bar">
+  <button id="bm" onclick="mute()">🎤</button>
+  <button id="bc" onclick="cam()">📷</button>
+  <button id="bf" onclick="flip()">🔄</button>
+  <button id="bs" onclick="spk()">🔊</button>
+  <button class="end" onclick="Android.hangup()">✕</button>
+</div>
+<script>
+var pc, local, initP, t0 = 0, video = false, spkOn = false, facing = 'user', pendingIce = [];
+function $(id){ return document.getElementById(id); }
+
+function init(o){
+  video = o.video; spkOn = o.video;
+  $('name').textContent = o.name;
+  $('bs').className = spkOn ? '' : 'off';
+  if(!video){ $('local').style.display='none'; $('bc').style.display='none'; $('bf').style.display='none'; }
+  initP = (async function(){
+    local = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true },
+      video: video ? { facingMode: facing, width: { ideal: 640 }, height: { ideal: 480 } } : false
+    });
+    $('local').srcObject = local;
+    pc = new RTCPeerConnection({ iceServers: o.ice });
+    local.getTracks().forEach(function(t){ pc.addTrack(t, local); });
+    pc.ontrack = function(e){ $('remote').srcObject = e.streams[0]; };
+    pc.onicecandidate = function(e){ if(e.candidate) Android.signal('ice', JSON.stringify(e.candidate)); };
+    pc.onconnectionstatechange = function(){
+      var s = pc.connectionState;
+      if(s === 'connected' && !t0){ t0 = Date.now(); tick(); setInterval(tick, 1000); }
+      Android.state(s);
+    };
+    if(o.caller){
+      var off = await pc.createOffer();
+      await pc.setLocalDescription(off);
+      Android.signal('offer', JSON.stringify(pc.localDescription));
+    }
+  })().catch(function(e){ $('timer').textContent = 'Error: ' + e.message; Android.state('failed'); });
+}
+
+async function onSignal(kind, data){
+  await initP;
+  if(!pc) return;
+  try{
+    var d = JSON.parse(data);
+    if(kind === 'offer'){
+      await pc.setRemoteDescription(d);
+      await flushIce();
+      var a = await pc.createAnswer();
+      await pc.setLocalDescription(a);
+      Android.signal('answer', JSON.stringify(pc.localDescription));
+    } else if(kind === 'answer'){
+      await pc.setRemoteDescription(d);
+      await flushIce();
+    } else if(kind === 'ice'){
+      if(pc.remoteDescription) await pc.addIceCandidate(d); else pendingIce.push(d);
+    }
+  }catch(e){ console.log(e); }
+}
+async function flushIce(){ var l = pendingIce.splice(0); for(var i=0;i<l.length;i++) await pc.addIceCandidate(l[i]); }
+
+function tick(){
+  var s = Math.floor((Date.now() - t0) / 1000);
+  $('timer').textContent = String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
+}
+function mute(){ var t = local.getAudioTracks()[0]; t.enabled = !t.enabled; $('bm').className = t.enabled ? '' : 'off'; }
+function cam(){ var t = local.getVideoTracks()[0]; if(!t) return; t.enabled = !t.enabled; $('bc').className = t.enabled ? '' : 'off'; }
+function spk(){ spkOn = !spkOn; Android.speaker(spkOn); $('bs').className = spkOn ? '' : 'off'; }
+async function flip(){
+  try{
+    facing = facing === 'user' ? 'environment' : 'user';
+    var old = local.getVideoTracks()[0];
+    var s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing } });
+    var nt = s.getVideoTracks()[0];
+    var snd = pc.getSenders().find(function(x){ return x.track && x.track.kind === 'video'; });
+    if(snd) await snd.replaceTrack(nt);
+    local.removeTrack(old); old.stop(); local.addTrack(nt);
+    $('local').srcObject = local;
+    $('local').style.transform = facing === 'user' ? 'scaleX(-1)' : 'none';
+  }catch(e){ console.log(e); }
+}
+</script>
+</body></html>

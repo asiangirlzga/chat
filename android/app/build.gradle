@@ -1,0 +1,51 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Optional stable signing key (so updates install over old versions).
+// CI passes KEYSTORE_FILE / KS_PASS when the GitHub secrets exist; otherwise the debug key is used.
+def ksFile = System.getenv('KEYSTORE_FILE')
+
+android {
+    namespace 'app.litechat'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'app.litechat'
+        minSdk 29
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    signingConfigs {
+        if (ksFile) {
+            rel {
+                storeFile file(ksFile)
+                storePassword System.getenv('KS_PASS')
+                keyAlias 'litechat'
+                keyPassword System.getenv('KS_PASS')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig ksFile ? signingConfigs.rel : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
+// No dependencies on purpose: the APK stays tiny.
