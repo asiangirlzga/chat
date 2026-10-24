@@ -104,7 +104,7 @@ function parse_size($s) {
 }
 
 // ---------- routing ----------
-$r = $_GET['r'] ?? '/';
+$r = '/' . ltrim((string)($_GET['r'] ?? ''), '/');   // accepts r=api/x and r=/api/x (some WAFs dislike a leading slash)
 $method = $_SERVER['REQUEST_METHOD'];
 $ip = $_SERVER['REMOTE_ADDR'] ?? '?';
 

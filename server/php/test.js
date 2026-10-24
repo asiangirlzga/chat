@@ -8,7 +8,7 @@ const srv = spawn('php', ['-S', '127.0.0.1:' + PORT, '-t', dir], { env: { ...pro
 const B = 'http://127.0.0.1:' + PORT + '/index.php';
 const api = async (m, p, t, body, raw) => {
   const [pp, qq] = p.split('?');
-  const r = await fetch(B + '?r=' + pp + (qq ? '&' + qq : ''), { method: m, headers: { ...(t ? { 'X-Token': t } : {}), ...(raw ? raw.h : { 'Content-Type': 'application/json' }) }, body: raw ? raw.b : body ? JSON.stringify(body) : undefined });
+  const r = await fetch(B + '?r=' + pp.slice(1) + (qq ? '&' + qq : ''), { method: m, headers: { ...(t ? { 'X-Token': t } : {}), ...(raw ? raw.h : { 'Content-Type': 'application/json' }) }, body: raw ? raw.b : body ? JSON.stringify(body) : undefined });
   const ct = r.headers.get('content-type') || '';
   return { s: r.status, j: ct.includes('json') ? await r.json() : await r.text() };
 };

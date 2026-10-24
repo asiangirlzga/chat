@@ -23,6 +23,8 @@ import java.net.URLEncoder;
 
 /** Tiny HTTP client for the LiteChat server (no libraries). Always call from a background thread. */
 final class Api {
+    static final String UA = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36 LiteChat/1.0";
+
     static class Err extends Exception { Err(String m) { super(m); } }
 
     /** Maps an API path to a URL. PHP hosts have no URL rewriting, so the path travels in ?r=. */
@@ -31,26 +33,33 @@ final class Api {
         if (!Prefs.isPhp()) return base + path;
         int q = path.indexOf('?');
         String p = q < 0 ? path : path.substring(0, q), rest = q < 0 ? "" : path.substring(q + 1);
-        return base + "?r=" + p + (rest.isEmpty() ? "" : "&" + rest);
+        return base + "?r=" + (p.startsWith("/") ? p.substring(1) : p) + (rest.isEmpty() ? "" : "&" + rest);
     }
 
     /** If the address is a plain website that runs LiteChat's PHP file, switch to PHP mode (…/index.php). */
     static void detectPhp() {
         if (Prefs.server().endsWith(".php") || Prefs.host()) return;
-        try {
-            HttpURLConnection c = (HttpURLConnection) new URL(Prefs.server() + "/").openConnection();
-            c.setConnectTimeout(8000);
-            c.setReadTimeout(8000);
-            byte[] buf = new byte[300];
-            int n = 0;
-            try (InputStream is = c.getInputStream()) { n = Math.max(0, is.read(buf)); }
-            if (new String(buf, 0, n, "UTF-8").contains("LiteChat PHP server")) Prefs.put("server", Prefs.server() + "/index.php");
-        } catch (Exception ignored) { }
+        for (String suffix : new String[]{"/", "/index.php"}) {
+            try {
+                HttpURLConnection c = (HttpURLConnection) new URL(Prefs.server() + suffix).openConnection();
+                c.setRequestProperty("User-Agent", UA);
+                c.setConnectTimeout(8000);
+                c.setReadTimeout(8000);
+                byte[] buf = new byte[300];
+                int n = 0;
+                try (InputStream is = c.getInputStream()) { n = Math.max(0, is.read(buf)); }
+                if (new String(buf, 0, n, "UTF-8").contains("LiteChat PHP server")) {
+                    Prefs.put("server", Prefs.server() + "/index.php");
+                    return;
+                }
+            } catch (Exception ignored) { }
+        }
     }
 
     static HttpURLConnection open(String path, String method) throws IOException {
         HttpURLConnection c = (HttpURLConnection) new URL(url(path)).openConnection();
         c.setRequestMethod(method);
+        c.setRequestProperty("User-Agent", UA);
         c.setConnectTimeout(10000);
         c.setReadTimeout(20000);
         String t = Prefs.get("token");
@@ -90,7 +99,11 @@ final class Api {
             if (code < 400) throw new Err("Unexpected reply - check the server address (some free hosts block apps with a browser-check page)");
             j = new JSONObject();
         }
-        if (code >= 400) throw new Err(j.optString("error", "Server error " + code));
+        if (code >= 400) {
+            String snip = s.replaceAll("(?s)<[^>]*>", " ").replaceAll("\\s+", " ").trim();
+            if (snip.length() > 90) snip = snip.substring(0, 90);
+            throw new Err(j.optString("error", "Server error " + code + (snip.isEmpty() ? "" : " - " + snip) + " (host blocked the request before LiteChat saw it?)"));
+        }
         return j;
     }
 
