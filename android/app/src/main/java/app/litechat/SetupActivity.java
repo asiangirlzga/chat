@@ -6,6 +6,9 @@ import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
+import android.webkit.CookieManager;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -108,8 +111,52 @@ public class SetupActivity extends Activity {
         final String s = server.getText().toString().trim(), n = name.getText().toString().trim();
         if (s.isEmpty() || n.isEmpty()) { info.setText("Enter the server address and your name."); return; }
         Prefs.setServer(s);
+        Prefs.put("cookie", "");
+        Prefs.put("ua", "");
         final String inv = inviter.getText().toString().trim();
         busy(true, "Contacting server…");
+        if (Prefs.server().startsWith("https://")) {
+            passBrowserCheck(new Runnable() { @Override public void run() { register(n, inv); } });
+        } else {
+            register(n, inv);
+        }
+    }
+
+    /**
+     * Some free hosts answer apps with a JavaScript "browser check" page. A hidden WebView runs that
+     * JavaScript like a normal browser; we keep the cookie it earns and reuse it for all requests.
+     */
+    private void passBrowserCheck(final Runnable done) {
+        final WebView w = new WebView(this);
+        w.getSettings().setJavaScriptEnabled(true);
+        String base = Prefs.server();
+        final String url = base.endsWith(".php") ? base : base + "/";
+        final boolean[] fin = {false};
+        final Runnable finish = new Runnable() {
+            @Override public void run() {
+                if (fin[0]) return;
+                fin[0] = true;
+                String ck = CookieManager.getInstance().getCookie(url);
+                if (ck != null) Prefs.put("cookie", ck);
+                Prefs.put("ua", w.getSettings().getUserAgentString());
+                w.destroy();
+                done.run();
+            }
+        };
+        CookieManager.getInstance().setAcceptCookie(true);
+        w.setWebViewClient(new WebViewClient() {
+            @Override public void onPageFinished(WebView v, String u) {
+                v.evaluateJavascript("(document.body ? document.body.innerText : '')", new android.webkit.ValueCallback<String>() {
+                    @Override public void onReceiveValue(String r) { if (r != null && r.contains("LiteChat PHP server")) finish.run(); }
+                });
+            }
+        });
+        info.setText("Passing the host's browser check…");
+        w.loadUrl(url);
+        App.ui.postDelayed(finish, 20000);                       // give up waiting after 20 s and try anyway
+    }
+
+    private void register(final String n, final String inv) {
         App.io.execute(new Runnable() {
             @Override public void run() {
                 try {

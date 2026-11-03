@@ -42,7 +42,7 @@ final class Api {
         for (String suffix : new String[]{"/", "/index.php"}) {
             try {
                 HttpURLConnection c = (HttpURLConnection) new URL(Prefs.server() + suffix).openConnection();
-                c.setRequestProperty("User-Agent", UA);
+                identify(c);
                 c.setConnectTimeout(8000);
                 c.setReadTimeout(8000);
                 byte[] buf = new byte[300];
@@ -56,10 +56,17 @@ final class Api {
         }
     }
 
+    /** Use the cookie + user-agent the hidden browser got after passing the host's browser check (if any). */
+    static void identify(HttpURLConnection c) {
+        String ua = Prefs.get("ua"), ck = Prefs.get("cookie");
+        c.setRequestProperty("User-Agent", ua.isEmpty() ? UA : ua);
+        if (!ck.isEmpty()) c.setRequestProperty("Cookie", ck);
+    }
+
     static HttpURLConnection open(String path, String method) throws IOException {
         HttpURLConnection c = (HttpURLConnection) new URL(url(path)).openConnection();
         c.setRequestMethod(method);
-        c.setRequestProperty("User-Agent", UA);
+        identify(c);
         c.setConnectTimeout(10000);
         c.setReadTimeout(20000);
         String t = Prefs.get("token");
@@ -96,7 +103,11 @@ final class Api {
         JSONObject j;
         try { j = new JSONObject(s); }
         catch (Exception e) {
-            if (code < 400) throw new Err("Unexpected reply - check the server address (some free hosts block apps with a browser-check page)");
+            if (code < 400) {
+                String snip = s.replaceAll("(?s)<(script|style).*?</\\1>", " ").replaceAll("(?s)<[^>]*>", " ").replaceAll("\\s+", " ").trim();
+                if (snip.length() > 90) snip = snip.substring(0, 90);
+                throw new Err("Unexpected reply from server: \"" + snip + "\"");
+            }
             j = new JSONObject();
         }
         if (code >= 400) {
