@@ -130,7 +130,7 @@ public class MainActivity extends Activity implements Core.Listener {
         l.setPadding(Ui.dp(14), Ui.dp(10), Ui.dp(14), Ui.dp(10));
         ImageView iv = new ImageView(this);
         int px = Ui.dp(48);
-        iv.setImageBitmap(Ui.avatar(r.img, r.code.equals("SYSTEM") ? "✉" : r.name, px));
+        iv.setImageBitmap(Ui.avatar(r.img, (r.code.equals("SYSTEM") || r.code.equals("ADMIN")) ? "✉" : r.name, px));
         l.addView(iv, new LinearLayout.LayoutParams(px, px));
 
         LinearLayout mid = new LinearLayout(this);
@@ -189,7 +189,7 @@ public class MainActivity extends Activity implements Core.Listener {
     }
 
     private void rowMenu(final Db.Row r) {
-        if (r.code.equals("SYSTEM")) return;
+        if (r.code.equals("SYSTEM") || r.code.equals("ADMIN")) return;
         String[] items = r.saved ? new String[]{"Edit contact", "Delete contact"} : new String[]{"Save to phone book"};
         new AlertDialog.Builder(this).setTitle(r.name).setItems(items, new DialogInterface.OnClickListener() {
             @Override public void onClick(DialogInterface d, int which) {

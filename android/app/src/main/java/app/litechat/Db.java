@@ -69,6 +69,7 @@ final class Db extends SQLiteOpenHelper {
     }
     String nameOf(String code) {
         if (code.equals("SYSTEM")) return "Invites & OTP";
+        if (code.equals("ADMIN")) return "LiteChat Support";
         Contact c = contact(code);
         return c != null && !c.name.isEmpty() ? c.name : code;
     }
@@ -144,7 +145,8 @@ final class Db extends SQLiteOpenHelper {
         for (Row r : out) { r.last = last(r.code); r.unread = unread(r.code); }
         Collections.sort(out, new Comparator<Row>() {
             @Override public int compare(Row a, Row b) {
-                if (a.code.equals("SYSTEM") != b.code.equals("SYSTEM")) return a.code.equals("SYSTEM") ? -1 : 1;
+                boolean ap = a.code.equals("SYSTEM") || a.code.equals("ADMIN"), bp = b.code.equals("SYSTEM") || b.code.equals("ADMIN");
+                if (ap != bp) return ap ? -1 : 1;
                 long ta = a.last == null ? 0 : a.last.ts, tb = b.last == null ? 0 : b.last.ts;
                 if (ta != tb) return ta > tb ? -1 : 1;
                 return a.name.compareToIgnoreCase(b.name);

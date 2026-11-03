@@ -45,6 +45,18 @@ Messages, call invites and notifications still work; expect up to ~1 s delay. Th
 * Upload size is the host's `post_max_size` (often 8-10 MB). Calls use STUN only (TURN can be set at the top of `index.php`).
 * Test locally: `cd server/php && node test.js`.
 
+### Admin panel (PHP server only)
+
+To turn it on, edit `index.php` on the server and set `const ADMIN_KEY = 'your-password';`, then open `https://yoursite.com/?r=admin`
+in a browser and log in with that password. It can:
+* see registered users (code, name, join date), total files and storage used - **not** anyone's message content,
+* send a message to one user or everyone, which arrives as a normal chat from "LiteChat Support",
+* disable or re-enable an account (a disabled account's app is immediately signed out).
+
+Replies people send to Support land in that same "LiteChat Support" chat, like any support inbox - the panel still cannot read
+conversations between two other users. Leave `ADMIN_KEY` empty (the default) to turn the panel off entirely; `?r=admin` then
+answers 404. Test locally: `cd server/php && node testadmin.js`.
+
 ## 2. Get the app (GitHub builds it for you)
 
 1. Create a GitHub repository and push this folder (`git remote add origin ... && git push -u origin main`).

@@ -51,6 +51,8 @@ public class ChatActivity extends Activity implements Core.Listener {
         if (peer == null || !Prefs.registered()) { finish(); return; }
         peerName = Db.get().nameOf(peer);
         final boolean system = peer.equals("SYSTEM");
+        final boolean admin = peer.equals("ADMIN");
+        final boolean noFeatures = system || admin;   // no call/location for pseudo-contacts
         getWindow().setStatusBarColor(Ui.DARK);
 
         LinearLayout root = new LinearLayout(this);
@@ -63,15 +65,15 @@ public class ChatActivity extends Activity implements Core.Listener {
         ImageView av = new ImageView(this);
         Db.Contact ct = Db.get().contact(peer);
         int px = Ui.dp(40);
-        av.setImageBitmap(Ui.avatar(ct == null ? "" : ct.img, system ? "✉" : peerName, px));
+        av.setImageBitmap(Ui.avatar(ct == null ? "" : ct.img, noFeatures ? "✉" : peerName, px));
         bar.addView(av, new LinearLayout.LayoutParams(px, px));
         LinearLayout titles = new LinearLayout(this);
         titles.setOrientation(LinearLayout.VERTICAL);
         titles.setPadding(Ui.dp(10), 0, 0, 0);
         titles.addView(Ui.text(this, peerName, 17, Ui.WHITE, true));
-        titles.addView(Ui.text(this, system ? "OTP codes and invites" : peer, 12, 0xCCFFFFFF, false));
+        titles.addView(Ui.text(this, system ? "OTP codes and invites" : admin ? "Message the app's admin" : peer, 12, 0xCCFFFFFF, false));
         bar.addView(titles, new LinearLayout.LayoutParams(0, -2, 1f));
-        if (!system) {
+        if (!noFeatures) {
             bar.addView(Ui.iconBtn(this, "📞", v -> call(false)));
             bar.addView(Ui.iconBtn(this, "🎥", v -> call(true)));
             bar.addView(Ui.iconBtn(this, "📍", v -> whereIs()));

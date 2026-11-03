@@ -11,6 +11,7 @@ ignore_user_abort(false);
 
 const BOOTSTRAP_KEY = '';            // optional: if set, the very first user must type this key in the "friend's code" box
 const TURN_URL = '', TURN_USER = '', TURN_PASS = '';   // optional TURN server for calls on strict networks
+const ADMIN_KEY = '';                // set this to a password to turn on the admin panel at yoursite.com/?r=admin (leave empty to disable it)
 const STUB = "<?php http_response_code(403);exit; ?>\n";
 
 $DATA = __DIR__ . '/litechat_data';
@@ -44,7 +45,7 @@ function db_read() {
     $s = @file_get_contents($DBF);
     $d = $s === false ? null : json_decode(substr($s, strlen(STUB)), true);
     if (!is_array($d)) $d = [];
-    return $d + ['seq' => 0, 'users' => [], 'msgs' => [], 'regs' => [], 'hits' => []];
+    return $d + ['seq' => 0, 'users' => [], 'msgs' => [], 'regs' => [], 'hits' => [], 'adm' => []];
 }
 function db_write($db) {
     global $DBF;
@@ -73,7 +74,7 @@ function new_user(&$db, $name) {
     } while (isset($db['users'][$code]));
     $token = rtrim(strtr(base64_encode(random_bytes(24)), '+/', '-_'), '=');
     $db['users'][$code] = ['code' => $code, 'name' => $name, 'th' => hash('sha256', $token), 'sharing' => false,
-                           'trusted' => [], 'loc' => null];
+                           'trusted' => [], 'loc' => null, 'created' => time(), 'disabled' => false];
     return [$code, $token];
 }
 function limited(&$db, $key, $max, $secs) {
@@ -95,8 +96,113 @@ function me_from_token($db) {
     if ($t === '') $t = $_GET['t'] ?? '';
     if ($t === '') return null;
     $h = hash('sha256', $t);
-    foreach ($db['users'] as $u) if (hash_equals($u['th'], $h)) return $u['code'];
+    foreach ($db['users'] as $u) if (hash_equals($u['th'], $h)) return empty($u['disabled']) ? $u['code'] : null;
     return null;
+}
+
+// ---------- admin ----------
+function admin_token() { return $_COOKIE['ladm'] ?? ''; }
+function admin_ok($db) {
+    if (ADMIN_KEY === '') return false;
+    $t = admin_token();
+    return $t !== '' && isset($db['adm'][$t]) && $db['adm'][$t] > time();
+}
+function h($s) { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
+/** Minimal, dependency-free admin panel: see registered users, message one or everyone, disable/enable an account.
+ *  It deliberately cannot read anyone's private conversations - only messages people send *to* ADMIN (support). */
+function admin_page() {
+    global $DATA;
+    if (ADMIN_KEY === '') { http_response_code(404); echo 'Not found'; exit; }
+    $lk = lock();
+    $db = db_read();
+    $msg = '';
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $action = $_POST['action'] ?? '';
+        if ($action === 'login') {
+            if (hash_equals(ADMIN_KEY, (string)($_POST['pass'] ?? ''))) {
+                $tok = bin2hex(random_bytes(24));
+                $db['adm'] = array_filter($db['adm'] ?? [], function ($e) { return $e > time(); });
+                $db['adm'][$tok] = time() + 86400 * 7;
+                db_write($db);
+                setcookie('ladm', $tok, time() + 86400 * 7, '', '', !empty($_SERVER['HTTPS']), true);
+                header('Location: ?r=admin'); exit;
+            }
+            $msg = 'Wrong password.';
+        } elseif (admin_ok($db)) {
+            if ($action === 'logout') {
+                unset($db['adm'][admin_token()]); db_write($db);
+                setcookie('ladm', '', time() - 3600);
+                header('Location: ?r=admin'); exit;
+            } elseif ($action === 'send') {
+                $to = fmt($_POST['to'] ?? '');
+                $text = clean($_POST['text'] ?? '', 4000);
+                if ($text === '') { $msg = 'Message is empty.'; }
+                elseif (!isset($db['users'][$to])) { $msg = 'No such user code.'; }
+                else { add_msg($db, 'ADMIN', $to, 'text', $text); db_write($db); $msg = 'Sent to ' . $to . '.'; }
+            } elseif ($action === 'broadcast') {
+                $text = clean($_POST['text'] ?? '', 4000);
+                if ($text === '') { $msg = 'Message is empty.'; }
+                else { $n = 0; foreach ($db['users'] as $c => $u) { if ($c !== 'ADMIN') { add_msg($db, 'ADMIN', $c, 'text', $text); $n++; } } db_write($db); $msg = "Sent to $n user(s)."; }
+            } elseif ($action === 'toggle') {
+                $c = fmt($_POST['code'] ?? '');
+                if (isset($db['users'][$c])) { $db['users'][$c]['disabled'] = !($db['users'][$c]['disabled'] ?? false); db_write($db); $msg = ($db['users'][$c]['disabled'] ? 'Disabled ' : 'Enabled ') . $c; }
+            }
+        }
+    }
+    if (!admin_ok($db)) {
+        header('Content-Type: text/html; charset=utf-8');
+        echo '<!doctype html><meta name=viewport content="width=device-width,initial-scale=1"><title>LiteChat admin</title>' .
+             '<body style="font-family:sans-serif;max-width:360px;margin:60px auto;padding:0 16px">' .
+             '<h2>LiteChat admin</h2>' . ($msg ? '<p style="color:#c00">' . h($msg) . '</p>' : '') .
+             '<form method=post><input type=hidden name=action value=login>' .
+             '<input name=pass type=password placeholder=Password style="width:100%;padding:10px;box-sizing:border-box" autofocus>' .
+             '<button style="width:100%;padding:10px;margin-top:10px">Log in</button></form></body>';
+        exit;
+    }
+
+    // storage stats (no message content, just counts/sizes)
+    $files = @scandir($DATA . '/files') ?: [];
+    $fcount = 0; $fsize = 0;
+    foreach ($files as $f) { $p = $DATA . '/files/' . $f; if (is_file($p)) { $fcount++; $fsize += filesize($p); } }
+
+    header('Content-Type: text/html; charset=utf-8');
+    echo '<!doctype html><meta name=viewport content="width=device-width,initial-scale=1"><title>LiteChat admin</title>' .
+         '<body style="font-family:sans-serif;max-width:720px;margin:24px auto;padding:0 16px;line-height:1.4">' .
+         '<div style="display:flex;justify-content:space-between;align-items:center">' .
+         '<h2 style="margin:0">LiteChat admin</h2>' .
+         '<form method=post><input type=hidden name=action value=logout><button>Log out</button></form></div>';
+    if ($msg) echo '<p style="color:#070;font-weight:bold">' . h($msg) . '</p>';
+    echo '<p>' . count($db['users']) . ' user(s) · ' . $fcount . ' file(s), ' . round($fsize / 1048576, 1) . ' MB</p>';
+
+    echo '<h3>Message everyone</h3><form method=post>' .
+         '<input type=hidden name=action value=broadcast>' .
+         '<textarea name=text rows=2 style="width:100%;box-sizing:border-box" placeholder="Announcement to all users…"></textarea>' .
+         '<button style="margin-top:6px">Send to everyone</button></form>';
+
+    echo '<h3>Message one user</h3><form method=post style="display:flex;gap:6px;flex-wrap:wrap">' .
+         '<input type=hidden name=action value=send>' .
+         '<input name=to placeholder="XXXX-XXXX" style="flex:1;min-width:120px;padding:8px">' .
+         '<input name=text placeholder="Message" style="flex:3;min-width:200px;padding:8px">' .
+         '<button>Send</button></form>';
+
+    echo '<h3>Users</h3><table style="width:100%;border-collapse:collapse"><tr style="text-align:left;border-bottom:2px solid #ccc">' .
+         '<th style="padding:6px 4px">Code</th><th>Name</th><th>Joined</th><th>Status</th><th></th></tr>';
+    $rows = $db['users'];
+    uasort($rows, function ($a, $b) { return ($b['created'] ?? 0) <=> ($a['created'] ?? 0); });
+    foreach ($rows as $c => $u) {
+        $dis = !empty($u['disabled']);
+        echo '<tr style="border-bottom:1px solid #eee">' .
+             '<td style="padding:6px 4px;font-family:monospace">' . h($c) . '</td>' .
+             '<td>' . h($u['name']) . '</td>' .
+             '<td>' . (empty($u['created']) ? '-' : date('Y-m-d', $u['created'])) . '</td>' .
+             '<td>' . ($dis ? '<span style="color:#c00">disabled</span>' : 'active') . '</td>' .
+             '<td><form method=post style="margin:0"><input type=hidden name=action value=toggle>' .
+             '<input type=hidden name=code value="' . h($c) . '">' .
+             '<button>' . ($dis ? 'Enable' : 'Disable') . '</button></form></td></tr>';
+    }
+    echo '</table><p style="color:#888;font-size:13px">This panel cannot read anyone\'s conversations - only messages people send to "ADMIN" (support) show up as normal chat, like any support inbox.</p></body>';
+    exit;
 }
 function parse_size($s) {
     $n = (int)$s; $u = strtolower(substr(trim($s), -1));
@@ -113,6 +219,7 @@ if ($r === '/' || $r === '') {
     echo "LiteChat PHP server is running.\n";
     exit;
 }
+if ($r === '/admin') admin_page();
 
 // ----- registration (no token) -----
 if ($r === '/api/register/start' && $method === 'POST') {
